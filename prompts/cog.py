@@ -4,12 +4,14 @@ import discord
 from discord import app_commands
 from asgiref.sync import sync_to_async
 from discord.ext import commands
+from discord.ui import LayoutView, TextDisplay
 
 from django.db import IntegrityError
 
 from ballsdex.core.bot import BallsDexBot
 from ballsdex.core.utils import checks
 from ballsdex.core.utils.buttons import ConfirmChoiceView
+from ballsdex.core.utils.menus import Menu, TextFormatter, TextSource
 from settings.models import load_settings, Settings, PromptMessage
 
 from users.utils import get_user_model
@@ -22,6 +24,13 @@ CATEGORY_NAMES = {
     PromptMessage.PromptType.SPAWN: "Spawn",
     PromptMessage.PromptType.SLOW: "Slow",
 }
+
+CATEGORY_CHOICES = [
+    app_commands.Choice(name="Catch", value=1),
+    app_commands.Choice(name="Wrong", value=2),
+    app_commands.Choice(name="Spawn", value=3),
+    app_commands.Choice(name="Slow", value=4),
+]
 
 
 def promptmessage_create_check():
@@ -56,16 +65,32 @@ class Prompts(commands.GroupCog, group_name="promptmessage", group_description="
     def __init__(self, bot: "BallsDexBot"):
         self.bot = bot
 
+    async def _find_messages(
+        self, current: str = "", type: int | None = None
+    ) -> list[PromptMessage]:
+        """
+        Shared lookup used by the delete autocomplete, `search`, and `list`.
+        `current` does a case-insensitive substring match on the message contents;
+        leave it blank to match everything. `type` optionally filters by category.
+        """
+        qs = PromptMessage.objects.all()
+        if type is not None:
+            qs = qs.filter(category=type)
+        if current:
+            qs = qs.filter(message__icontains=current)
+        return [p async for p in qs.order_by("category", "message")]
+
+    def _format_message_lines(self, messages: list[PromptMessage]) -> str:
+        if not messages:
+            return "No prompt messages found."
+        return "\n".join(
+            f"[{CATEGORY_NAMES.get(p.category, p.category)}] (rarity {p.rarity}) {p.message}"
+            for p in messages
+        )
+
     @app_commands.command()
     @promptmessage_create_check()
-    @app_commands.choices(
-        type=[
-            app_commands.Choice(name="Catch", value=1),
-            app_commands.Choice(name="Wrong", value=2),
-            app_commands.Choice(name="Spawn", value=3),
-            app_commands.Choice(name="Slow", value=4),
-        ]
-    )
+    @app_commands.choices(type=CATEGORY_CHOICES)
     async def create(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -130,10 +155,7 @@ class Prompts(commands.GroupCog, group_name="promptmessage", group_description="
     async def delete_message_autocomplete(
         self, interaction: discord.Interaction["BallsDexBot"], current: str
     ) -> list[app_commands.Choice[str]]:
-        qs = PromptMessage.objects.all()
-        if current:
-            qs = qs.filter(message__icontains=current)
-        results = [p async for p in qs.order_by("message")[:25]]
+        results = (await self._find_messages(current))[:25]
         return [
             app_commands.Choice(
                 name=f"[{CATEGORY_NAMES.get(p.category, p.category)}] {p.message}"[:100],
@@ -145,14 +167,7 @@ class Prompts(commands.GroupCog, group_name="promptmessage", group_description="
     @app_commands.command()
     @promptmessage_manage_check()
     @app_commands.autocomplete(message=delete_message_autocomplete)
-    @app_commands.choices(
-        type=[
-            app_commands.Choice(name="Catch", value=1),
-            app_commands.Choice(name="Wrong", value=2),
-            app_commands.Choice(name="Spawn", value=3),
-            app_commands.Choice(name="Slow", value=4),
-        ]
-    )
+    @app_commands.choices(type=CATEGORY_CHOICES)
     async def delete(
         self,
         interaction: discord.Interaction["BallsDexBot"],
@@ -220,3 +235,60 @@ class Prompts(commands.GroupCog, group_name="promptmessage", group_description="
             f'{interaction.user} deleted prompt message "{prompt.message}" (category {prompt.category})',
             extra={"webhook": True},
         )
+
+    @app_commands.command()
+    @promptmessage_create_check()
+    @app_commands.choices(type=CATEGORY_CHOICES)
+    async def search(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        message: str,
+        type: int | None = None,
+    ):
+        """
+        Search prompt messages by (partial) contents, without deleting anything.
+
+        Parameters
+        ----------
+        message: str
+            Text to search for within the message contents.
+        type: int
+            Optionally restrict the search to one category (Catch/Wrong/Spawn/Slow).
+        """
+        await interaction.response.defer(ephemeral=True)
+        matches = await self._find_messages(message, type)
+        text = self._format_message_lines(matches)
+
+        view = LayoutView()
+        text_display = TextDisplay("")
+        view.add_item(text_display)
+        menu = Menu(self.bot, view, TextSource(text, prefix="```md\n", suffix="```"), TextFormatter(text_display))
+        await menu.init()
+        await interaction.followup.send(view=view, ephemeral=True)
+
+    @app_commands.command(name="list")
+    @promptmessage_create_check()
+    @app_commands.choices(type=CATEGORY_CHOICES)
+    async def list_(
+        self,
+        interaction: discord.Interaction["BallsDexBot"],
+        type: int | None = None,
+    ):
+        """
+        List all prompt messages.
+
+        Parameters
+        ----------
+        type: int
+            Optionally restrict the list to one category (Catch/Wrong/Spawn/Slow).
+        """
+        await interaction.response.defer(ephemeral=True)
+        matches = await self._find_messages(type=type)
+        text = self._format_message_lines(matches)
+
+        view = LayoutView()
+        text_display = TextDisplay("")
+        view.add_item(text_display)
+        menu = Menu(self.bot, view, TextSource(text, prefix="```md\n", suffix="```"), TextFormatter(text_display))
+        await menu.init()
+        await interaction.followup.send(view=view, ephemeral=True)
