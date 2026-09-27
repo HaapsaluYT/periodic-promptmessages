@@ -2,7 +2,7 @@
 name = "prompts"
 version = "0.0.1"
 
-description = "Add spawn messages from Discord instead of the admin panel!"
+description = "Add prompt messages from Discord instead of the admin panel!"
 
 dependencies = [
     # "ballsdex>=3.0.0",
