@@ -59,6 +59,7 @@ def promptmessage_manage_check():
     return app_commands.check(check)
 
 
+@app_commands.default_permissions(administrator=True)
 class Prompts(commands.GroupCog, group_name="promptmessage", group_description="Commands for prompts"):
     """Commands for prompt messages."""
 
@@ -238,11 +239,12 @@ class Prompts(commands.GroupCog, group_name="promptmessage", group_description="
 
     @app_commands.command()
     @promptmessage_create_check()
+    @app_commands.autocomplete(message=delete_message_autocomplete)
     @app_commands.choices(type=CATEGORY_CHOICES)
     async def search(
         self,
         interaction: discord.Interaction["BallsDexBot"],
-        message: str,
+        message: str = "",
         type: int | None = None,
     ):
         """
@@ -251,7 +253,7 @@ class Prompts(commands.GroupCog, group_name="promptmessage", group_description="
         Parameters
         ----------
         message: str
-            Text to search for within the message contents.
+            Text to search for within the message contents. Leave blank to match everything.
         type: int
             Optionally restrict the search to one category (Catch/Wrong/Spawn/Slow).
         """
