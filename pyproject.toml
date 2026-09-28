@@ -3,6 +3,8 @@ name = "prompts"
 version = "0.0.1"
 
 description = "Add prompt messages from Discord instead of the admin panel!"
+license = "MIT"
+license-files = ["LICENSE"]
 
 dependencies = [
     # "ballsdex>=3.0.0",
